@@ -1,6 +1,6 @@
 {
   "name": "snp-crcli",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "An advanced site crawler and document screenshot visualizer engine",
   "main": "bin/snp.js",
   "bin": {
