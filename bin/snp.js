@@ -164,41 +164,49 @@ if (opts.sl) {
     hideCursor: true
   }, cliProgress.Presets.shades_classic);
 
-  // Check if target is a Google Slides asset container
-  const isGoogleSlides = startUrl.hostname.includes('docs.google.com') && startUrl.pathname.includes('/presentation');
+  // Permissive lookahead for Google Slides architecture links
+  const isGoogleSlides = activeArgs.url.includes('docs.google.com');
 
   if (isGoogleSlides) {
     progressBar.start(maxPages, 0);
     const page = await context.newPage();
     try {
-      await page.goto(startUrl.href, { waitUntil: 'networkidle', timeout: 45000 });
+      // Use standard 'load' state to bypass infinite streaming websocket traps
+      await page.goto(startUrl.href, { waitUntil: 'load', timeout: 30000 });
+      
+      // Ensure the presentation stage wrapper is parsed before commencing screenshots
+      await page.waitForSelector('.punch-viewer-content, g.punch-viewer-svgpage-svgobj', { timeout: 10000 }).catch(() => {});
+      
       let presentationEnded = false;
       let lastSlideIdentifier = '';
 
       while (count < maxPages && !presentationEnded) {
-        // Wait for page rendering lifecycle stabilization
+        // Wait for frame transitions to settle smoothly
         await page.waitForTimeout(2000);
         
-        // Comprehensive multi-layer unique state extraction
         const currentSlideId = await page.evaluate(() => {
           const indicator = document.querySelector('.punch-viewer-navbar-page-number') || 
-                            document.querySelector('.punch-viewer-page-number-indicator');
+                            document.querySelector('.punch-viewer-page-number-indicator') ||
+                            document.querySelector('[class*="page-number"]');
           if (indicator && indicator.textContent.trim()) {
             return indicator.textContent.trim();
           }
-          const svgG = document.querySelector('g.punch-viewer-svgpage-svgobj');
+          const svgG = document.querySelector('g.punch-viewer-svgpage-svgobj') || 
+                       document.querySelector('.punch-viewer-svgpage-svgobj');
           if (svgG && svgG.innerHTML) {
-            return svgG.innerHTML.substring(0, 100);
+            return svgG.innerHTML.substring(0, 150);
           }
-          return window.location.href + '_' + window.location.hash;
+          return '';
         });
 
-        // Defend against early exit conditions by verifying page tracking has commenced
-        if (count > 0 && currentSlideId === lastSlideIdentifier) {
+        // Trigger end condition ONLY if we hit a verified duplicate matching slide ID
+        if (count > 0 && currentSlideId && currentSlideId === lastSlideIdentifier) {
           presentationEnded = true;
           break;
         }
-        lastSlideIdentifier = currentSlideId;
+        
+        // Lock sequence values or populate a synthetic progressive fallback tag
+        lastSlideIdentifier = currentSlideId ? currentSlideId : `fallback_sequence_idx_${count}`;
 
         const filename = `slide_${count + 1}.${imgFormat}`;
         const finalPath = path.join(outDir, filename);
@@ -209,7 +217,7 @@ if (opts.sl) {
         count++;
         progressBar.update(count);
 
-        // Dispatch native navigational arrow event directly down the stack channel
+        // Dispatch arrow event down the channel pipeline
         await page.keyboard.press('ArrowRight');
       }
     } catch (err) {
@@ -227,7 +235,7 @@ if (opts.sl) {
 
       const page = await context.newPage();
       try {
-        await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.goto(url, { waitUntil: 'load', timeout: 30000 });
         const filename = urlToFilename(url);
         let finalPath = path.join(outDir, filename);
         
@@ -260,7 +268,7 @@ if (opts.sl) {
           }
         }
       } catch (err) {
-        // Soft error resilience logging
+        console.error(`\n⚠️  Skipped target path URL execution error: ${err.message}`);
       } finally {
         await page.close();
       }
