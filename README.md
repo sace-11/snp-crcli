@@ -1,4 +1,3 @@
-Here is the complete, raw markdown for your `README.md`. You can copy the entire block below and paste it straight into your file:
 
 ```markdown
 # snp-crcli 📸
