@@ -119,7 +119,7 @@ if (opts.sl) {
       depth: flow.depth,
       width: '1440',
       height: '900',
-      same-domain-only: true
+      sameDomainOnly: true
     };
   } else if (!opts.url) {
     program.help();
