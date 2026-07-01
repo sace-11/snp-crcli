@@ -1,0 +1,36 @@
+{
+  "name": "snp-crcli",
+  "version": "1.0.0",
+  "description": "Give it a link, it screenshots every page it can find on that site.",
+  "bin": {
+    "snp": "./bin/snp.js"
+  },
+  "main": "bin/snp.js",
+  "scripts": {
+    "postinstall": "playwright install chromium"
+  },
+  "keywords": [
+    "screenshot",
+    "crawler",
+    "cli",
+    "playwright",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "playwright": "^1.47.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YOUR_USERNAME/snp-crcli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YOUR_USERNAME/snp-crcli/issues"
+  },
+  "homepage": "https://github.com/YOUR_USERNAME/snp-crcli#readme"
+}
