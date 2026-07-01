@@ -1,6 +1,6 @@
 {
   "name": "snp-crcli",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Give it a link, it screenshots every page it can find on that site.",
   "bin": {
     "snp": "./bin/snp.js"
