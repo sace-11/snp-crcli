@@ -27,10 +27,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YOUR_USERNAME/snp-crcli.git"
+    "url": "git+https://github.com/sace-11/snp-crcli.git"
   },
   "bugs": {
-    "url": "https://github.com/YOUR_USERNAME/snp-crcli/issues"
+    "url": "https://github.com/sace-11/snp-crcli/issues"
   },
-  "homepage": "https://github.com/YOUR_USERNAME/snp-crcli#readme"
+  "homepage": "https://github.com/sace-11/snp-crcli#readme"
 }
