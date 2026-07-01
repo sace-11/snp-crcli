@@ -1,36 +1,31 @@
 {
   "name": "snp-crcli",
-  "version": "1.0.3",
-  "description": "Give it a link, it screenshots every page it can find on that site.",
+  "version": "2.0.0",
+  "description": "An advanced site crawler and document screenshot visualizer engine",
+  "main": "bin/snp.js",
   "bin": {
     "snp": "./bin/snp.js"
   },
-  "main": "bin/snp.js",
   "scripts": {
-    "postinstall": "playwright install chromium"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
+    "scraper",
     "screenshot",
     "crawler",
-    "cli",
     "playwright",
-    "automation"
+    "pptx",
+    "docx",
+    "cli"
   ],
-  "author": "",
+  "author": "sace-11",
   "license": "MIT",
-  "engines": {
-    "node": ">=18"
-  },
   "dependencies": {
-    "commander": "^12.1.0",
-    "playwright": "^1.47.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/sace-11/snp-crcli.git"
-  },
-  "bugs": {
-    "url": "https://github.com/sace-11/snp-crcli/issues"
-  },
-  "homepage": "https://github.com/sace-11/snp-crcli#readme"
+    "cli-progress": "^3.12.0",
+    "commander": "^11.1.0",
+    "docx": "^8.5.0",
+    "inquirer": "^8.2.5",
+    "playwright": "^1.40.0",
+    "pptxgenjs": "^3.12.0"
+  }
 }

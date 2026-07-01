@@ -1,118 +1,89 @@
-
 ```markdown
 # snp-crcli 📸
 
-Give it a link. It crawls the site, screenshots every page it can find, and saves them directly to your computer in the format you specify.
+An advanced terminal automation engine that crawls links or targets Google Slides presentations, captures snapshots, and bundles them into your choice of static formats—including images, PowerPoint presentations, or Word documents.
 
-`snp` (the command this package installs) performs a breadth-first crawl starting from a seed URL, following internal links on the same domain by default, and captures full-page screenshots of every page it visits.
+---
+
+## Features
+
+* **Interactive TUI Mode**: Launch the wizard by typing `snp` without arguments.
+* **Smart Google Slides Automation**: Detects presentation structures and systematically hits navigational keys to save every slide layout.
+* **Document Bundle Formats**: Supports direct compilations into `.pptx` and `.docx` out of the box.
+* **First-Run Sync**: Remembers your preferred default format across operations.
+* **Secure URL Shortener**: Directly integrated link management sub-system.
 
 ---
 
 ## Install
 
-Install the package globally via npm:
+Install globally onto your system architecture via npm:
 
 ```bash
 npm install -g snp-crcli
 
 ```
 
-> **Note:** This will automatically install a headless Chromium build via Playwright (~300MB, one-time setup). Once installed, the global command available in your terminal is **`snp`**.
+---
 
-### Local / Development Setup
+## Usage Syntax
 
-If you want to run it directly from the source code without installing it globally:
+### 1. Interactive Application UI Mode
+
+Simple call the application without positional parameters to initiate the TUI wizard configuration setup:
 
 ```bash
-git clone [https://github.com/sace-11/snp-crcli.git](https://github.com/sace-11/snp-crcli.git)
-cd snp-crcli
-npm install
-npx playwright install chromium
-node bin/snp.js --url [https://example.com](https://example.com)
+snp
+
+```
+
+### 2. Standard CLI Automation Commands
+
+```bash
+snp --url "[https://example.com](https://example.com)" --out ./shots --format pptx --max 25
+
+```
+
+### 3. Google Slides Layout Capture Execution
+
+*Always wrap highly parameterized URLs in strict quotation marks to avoid zsh terminal escaping evaluation bugs.*
+
+```bash
+snp --url "[https://docs.google.com/presentation/d/e/2PACX-1vQ1.../pub](https://docs.google.com/presentation/d/e/2PACX-1vQ1.../pub)" --format pptx --max 15
+
+```
+
+### 4. Link Shortener Routine
+
+```bash
+snp --sl "[https://my-long-deep-link-location-here.com/data/metrics](https://my-long-deep-link-location-here.com/data/metrics)"
 
 ```
 
 ---
 
-## Usage
+## Technical Configuration Parameters
 
-```bash
-snp --url [https://example.com](https://example.com) --out ./shots --format png --max 30 --depth 2
-
-```
-
-### Options
-
-| Flag | Description | Default |
+| Flag | Parameter Target | Default Value |
 | --- | --- | --- |
-| `-u, --url <url>` | Starting URL to crawl (**required**) | — |
-| `-o, --out <dir>` | Output directory for images | `./screenshots` |
-| `-f, --format <format>` | Image format: `png` or `jpeg` | `png` |
-| `-m, --max <number>` | Max total pages to crawl | `50` |
-| `-d, --depth <number>` | Max link-hops deep to follow | `3` |
-| `--width <px>` | Viewport width | `1440` |
-| `--height <px>` | Viewport height | `900` |
-| `--same-domain-only` | Only follow links on the exact same domain | `true` |
-| `--cookies <path>` | Path to a JSON file of session cookies to load | — |
+| `-u, --url` | Target web destination or slide system | — |
+| `-o, --out` | Absolute or relative asset directory path | `./screenshots` |
+| `-f, --format` | Selection criteria: `png`, `jpeg`, `pptx`, `docx` | `png` *(or first-run pick)* |
+| `-m, --max` | Cutoff ceiling capacity threshold limit | `50` |
+| `-d, --depth` | Level tracking depth boundary index for crawls | `3` |
+| `--sl` | Address link pipeline to pass through to shortener API | — |
+| `--help` | Reflect operational specifications documentation | — |
 
-### Example
+---
+
+## How to Uninstall
+
+To smoothly purge the global package execution binary and its tracking context completely from your system registry infrastructure, run:
 
 ```bash
-snp -u [https://docs.example.com](https://docs.example.com) -o ./docs-shots -f jpeg -m 100 -d 4
+snp uninstall
 
 ```
-
----
-
-## Output Structure
-
-Screenshots are saved directly to your target directory and are dynamically named based on the URL path. A `_manifest.json` file is generated alongside the images, creating a clean map of your crawl data:
-
-```json
-[
-  { 
-    "url": "[https://example.com/](https://example.com/)", 
-    "file": "home.png" 
-  },
-  { 
-    "url": "[https://example.com/about](https://example.com/about)", 
-    "file": "about.png" 
-  }
-]
-
-```
-
-### Authenticated Sites
-
-To crawl dashboards or pages behind login walls, export your browser session cookies into a JSON file (matching Playwright's expected cookie structure) and pass them through:
-
-```bash
-snp --url [https://app.example.com/dashboard](https://app.example.com/dashboard) --cookies ./cookies.json
-
-```
-
----
-
-## How It Works
-
-`snp` utilizes Playwright to orchestrate a headless instance of Chromium. It runs a synchronized breadth-first crawl sequence:
-
-1. Navigates to the page and waits for `networkidle`.
-2. Captures a full-page scrollable screenshot.
-3. Parses the DOM for valid `<a href>` links.
-4. Filters out external domains (by default) and queues new unique paths.
-5. Continues cycle until `--max` limits or `--depth` thresholds are encountered.
-
-### Limitations
-
-* **Infinite Scroll:** Will only capture what is loaded during the initial page lifecycle render.
-* **Complex JS Routing:** Dynamic Single Page Applications (SPAs) that handle page generation entirely through complex internal JS state transitions (without updating standard anchors) may result in reduced discovery rates.
-
----
-
-## Contributing
-
-Pull requests are welcome. For major feature changes or structural re-architecting, please open an issue first to discuss what you would like to change.
 
 ## License
 
