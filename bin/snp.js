@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
+// Suppress annoying Playwright/Chromium warnings
+process.env.NODE_NO_WARNINGS = '1';
+
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -11,7 +14,7 @@ const { Command } = require('commander');
 const PKG = require('../package.json');
 const CONFIG_PATH = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.snp-config.json');
 
-// --- Fast path: uninstall, skip loading the heavy stuff entirely ---
+// --- Fast path: uninstall ---
 if (process.argv[2] === 'uninstall') {
   console.log('Uninstalling snp-crcli globally...');
   try {
@@ -29,6 +32,8 @@ const inquirer = require('inquirer');
 const cliProgress = require('cli-progress');
 const PptxGenJS = require('pptxgenjs');
 const docx = require('docx');
+
+// ... rest of your existing code stays exactly the same ...
 
 // ---------- config ----------
 function loadConfig() {
