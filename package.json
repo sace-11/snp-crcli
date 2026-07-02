@@ -1,6 +1,6 @@
 {
   "name": "snp-crcli",
-  "version": "3.1.6",
+  "version": "3.1.7",
   "description": "Crawl a website or Google Slides deck and save screenshots as PNG, JPEG, PPTX, or DOCX with visual stability detection.",
   "main": "bin/snp.js",
   "bin": {
