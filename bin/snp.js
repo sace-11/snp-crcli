@@ -1,8 +1,12 @@
 #!/usr/bin/env node
-'use strict';
 
-// Suppress annoying Playwright/Chromium warnings
+// Suppress warnings
 process.env.NODE_NO_WARNINGS = '1';
+process.emitWarning = (warning) => {
+  if (warning && warning.toString().includes('localstorage-file')) return;
+};
+
+'use strict';
 
 const fs = require('fs');
 const path = require('path');
@@ -14,12 +18,12 @@ const { Command } = require('commander');
 const PKG = require('../package.json');
 const CONFIG_PATH = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.snp-config.json');
 
-// --- Fast path: uninstall ---
+// Fast uninstall
 if (process.argv[2] === 'uninstall') {
   console.log('Uninstalling snp-crcli globally...');
   try {
     execSync('npm uninstall -g snp-crcli', { stdio: 'inherit' });
-    console.log('Done. snp-crcli has been removed from this machine.');
+    console.log('Done.');
   } catch (err) {
     console.error('Could not auto-uninstall. Run manually: npm uninstall -g snp-crcli');
     process.exitCode = 1;
@@ -32,54 +36,96 @@ const inquirer = require('inquirer');
 const cliProgress = require('cli-progress');
 const PptxGenJS = require('pptxgenjs');
 const docx = require('docx');
+const { PDFDocument } = require('pdf-lib');
 
-// ... rest of your existing code stays exactly the same ...
-
-// ---------- config ----------
-function loadConfig() {
-  try {
-    if (fs.existsSync(CONFIG_PATH)) return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  } catch (_) {}
-  return null;
-}
-function saveConfig(cfg) {
-  try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2)); } catch (_) {}
-}
-
-// ---------- content-stability engine ----------
-// Instead of trusting 'networkidle' (which never fires on sites with persistent
-// sockets, like Google Slides), this hashes the visible frame every ~200ms and
-// only returns once the picture stops changing for a short quiet period.
-async function waitForStableFrame(page, { timeoutMs = 8000, quietMs = 450, pollMs = 200 } = {}) {
+// ---------- Stability Engine ----------
+async function waitForStableFrame(page, { timeoutMs = 12000, quietMs = 800, pollMs = 300 } = {}) {
   const start = Date.now();
   let lastHash = null;
   let stableSince = null;
 
   while (Date.now() - start < timeoutMs) {
-    let hash;
     try {
       const buf = await page.screenshot({ type: 'jpeg', quality: 35 });
-      hash = crypto.createHash('md5').update(buf).digest('hex');
-    } catch (_) {
-      break; // page mid-navigation or closed; bail out cleanly
-    }
+      const hash = crypto.createHash('md5').update(buf).digest('hex');
 
-    if (hash === lastHash) {
-      if (!stableSince) stableSince = Date.now();
-      if (Date.now() - stableSince >= quietMs) return hash;
-    } else {
-      stableSince = null;
-    }
-    lastHash = hash;
-    await page.waitForTimeout(pollMs);
+      if (hash === lastHash) {
+        if (!stableSince) stableSince = Date.now();
+        if (Date.now() - stableSince >= quietMs) return hash;
+      } else {
+        stableSince = null;
+      }
+      lastHash = hash;
+      await page.waitForTimeout(pollMs);
+    } catch (_) { break; }
   }
   return lastHash;
 }
 
-async function settlePage(page) {
-  await page.waitForLoadState('domcontentloaded').catch(() => {});
-  await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
-  return waitForStableFrame(page);
+async function readSlideIndicator(page) {
+  return page.evaluate(() => {
+    const selectors = [
+      '.punch-viewer-navbar-page-number',
+      '.punch-viewer-page-number-indicator',
+      '[class*="page-number"]',
+      '[aria-label*="Slide"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.textContent && el.textContent.trim()) return el.textContent.trim();
+    }
+    const match = document.body.innerText.match(/\b(\d+)\s*\/\s*(\d+)\b/);
+    return match ? match[0] : null;
+  }).catch(() => null);
+}
+
+// ---------- Google Slides Smart Crawler ----------
+async function crawlGoogleSlides(context, startUrl, { outDir, imgFormat, maxPages, progressBar }) {
+  const page = await context.newPage();
+  const trackingLog = [];
+  let slideNum = 1;
+
+  try {
+    await page.goto(startUrl.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await waitForStableFrame(page);
+
+    let lastIndicator = await readSlideIndicator(page);
+    progressBar.start(maxPages, 0);
+
+    while (slideNum <= maxPages) {
+      // Wait for full content on this slide (handles multiple ArrowRight presses for builds)
+      await waitForStableFrame(page);
+
+      const filename = `slide_${String(slideNum).padStart(2, '0')}.${imgFormat}`;
+      const finalPath = path.join(outDir, filename);
+
+      await page.screenshot({ path: finalPath, fullPage: false, type: imgFormat });
+      trackingLog.push({ slide: slideNum, filepath: finalPath, url: `${startUrl.href}#slide=${slideNum}` });
+
+      progressBar.update(slideNum);
+
+      // Move to next
+      await page.keyboard.press('ArrowRight');
+      const newHash = await waitForStableFrame(page);
+
+      const currentIndicator = await readSlideIndicator(page);
+      if (currentIndicator && lastIndicator && currentIndicator !== lastIndicator) {
+        const prevNum = parseIndicatorNum(lastIndicator);
+        const currNum = parseIndicatorNum(currentIndicator);
+        if (currNum && prevNum && currNum <= prevNum) break; // looped or end
+        lastIndicator = currentIndicator;
+        slideNum++;
+      } else if (newHash === await waitForStableFrame(page)) {
+        break; // truly no change = end of deck
+      } else {
+        slideNum++;
+      }
+    }
+    progressBar.update(Math.min(slideNum, maxPages));
+  } finally {
+    await page.close();
+  }
+  return trackingLog;
 }
 
 function parseIndicatorNum(text) {
@@ -88,113 +134,7 @@ function parseIndicatorNum(text) {
   return m ? parseInt(m[1], 10) : null;
 }
 
-async function readSlideIndicator(page) {
-  return page.evaluate(() => {
-    const selectors = [
-      '.punch-viewer-navbar-page-number',
-      '.punch-viewer-page-number-indicator',
-      '[class*="page-number"]'
-    ];
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el && el.textContent && el.textContent.trim()) return el.textContent.trim();
-    }
-    const match = document.body.innerText.match(/\b\d+\s*\/\s*\d+\b/);
-    return match ? match[0] : null;
-  }).catch(() => null);
-}
-
-// ---------- filename helpers ----------
-function urlToFilename(targetUrl, ext) {
-  const u = new URL(targetUrl);
-  let p = (u.pathname === '/' || u.pathname === '') ? 'home' : u.pathname;
-  p = p.replace(/^\/|\/$/g, '').replace(/\//g, '_');
-  const query = u.search ? '_' + u.search.replace(/[?&=]/g, '-') : '';
-  const safe = (p + query).replace(/[^a-zA-Z0-9-_]/g, '') || 'page';
-  return `${safe}.${ext}`;
-}
-
-function uniquePath(dir, filename, ext) {
-  let finalPath = path.join(dir, filename);
-  let i = 1;
-  const base = path.basename(filename, `.${ext}`);
-  while (fs.existsSync(finalPath)) {
-    finalPath = path.join(dir, `${base}_${i}.${ext}`);
-    i++;
-  }
-  return finalPath;
-}
-
-// ---------- Google Slides capture ----------
-// Presses ArrowRight repeatedly. If the on-screen page counter changes, we've
-// moved to a new slide, so the last frame saved under the old slide number was
-// its fully-built final state. If the counter DOESN'T change but the frame did,
-// we're mid-build on the same slide — we overwrite that slide's file with the
-// newer, more complete frame and keep going.
-async function crawlGoogleSlides(context, startUrl, { outDir, imgFormat, maxPages, progressBar }) {
-  const page = await context.newPage();
-  const trackingLog = [];
-  try {
-    await page.goto(startUrl.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await settlePage(page);
-
-    let slideNum = 1;
-    let lastIndicator = await readSlideIndicator(page);
-    const indicatorSupported = lastIndicator !== null;
-
-    let totalHint = null;
-    const m = lastIndicator ? lastIndicator.match(/(\d+)\s*\/\s*(\d+)/) : null;
-    if (m) totalHint = parseInt(m[2], 10);
-    const target = totalHint ? Math.min(maxPages, totalHint) : maxPages;
-    progressBar.start(target, 0);
-
-    const maxIterations = maxPages * 8; // safety net against pathological build sequences
-    let iterations = 0;
-    let lastFrameHash = await waitForStableFrame(page);
-
-    while (slideNum <= maxPages && iterations < maxIterations) {
-      iterations++;
-
-      const filename = `slide_${String(slideNum).padStart(2, '0')}.${imgFormat}`;
-      const finalPath = path.join(outDir, filename);
-      await page.screenshot({ path: finalPath, fullPage: false, type: imgFormat });
-
-      if (!trackingLog.find(t => t.slide === slideNum)) {
-        trackingLog.push({ url: `${startUrl.href}#slide=${slideNum}`, file: filename, filepath: finalPath, slide: slideNum });
-      }
-
-      await page.keyboard.press('ArrowRight');
-      const newHash = await waitForStableFrame(page);
-
-      if (newHash === lastFrameHash) break; // nothing changed — end of deck
-      lastFrameHash = newHash;
-
-      if (indicatorSupported) {
-        const indicator = await readSlideIndicator(page);
-        if (indicator && indicator !== lastIndicator) {
-          const prevNum = parseIndicatorNum(lastIndicator);
-          const nextNum = parseIndicatorNum(indicator);
-          if (prevNum !== null && nextNum !== null && nextNum < prevNum) break; // looped back to slide 1
-          lastIndicator = indicator;
-          slideNum++;
-          progressBar.update(Math.min(slideNum - 1, target));
-        }
-        // else: still mid-build on the same slide — loop back and overwrite this file
-      } else {
-        // No page-counter found on this deck's markup; treat every distinct
-        // frame as a new slide so nothing gets silently dropped.
-        slideNum++;
-        progressBar.update(Math.min(slideNum - 1, target));
-      }
-    }
-    progressBar.update(Math.min(slideNum, target));
-  } finally {
-    await page.close();
-  }
-  return trackingLog;
-}
-
-// ---------- regular website crawl ----------
+// ---------- Website Crawler ----------
 async function crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, maxDepth, sameDomainOnly, progressBar }) {
   const visited = new Set();
   const queue = [{ url: startUrl.href, depth: 0 }];
@@ -210,7 +150,7 @@ async function crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, ma
     const page = await context.newPage();
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await settlePage(page);
+      await waitForStableFrame(page);
 
       const filename = urlToFilename(url, imgFormat);
       const finalPath = uniquePath(outDir, filename, imgFormat);
@@ -234,16 +174,34 @@ async function crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, ma
           } catch (_) {}
         }
       }
-    } catch (_) {
-      // one bad page shouldn't kill the whole crawl
-    } finally {
+    } catch (_) {} finally {
       await page.close();
     }
   }
   return trackingLog;
 }
 
-// ---------- bundlers ----------
+function urlToFilename(targetUrl, ext) {
+  const u = new URL(targetUrl);
+  let p = (u.pathname === '/' || u.pathname === '') ? 'home' : u.pathname;
+  p = p.replace(/^\/|\/$/g, '').replace(/\//g, '_');
+  const query = u.search ? '_' + u.search.replace(/[?&=]/g, '-') : '';
+  const safe = (p + query).replace(/[^a-zA-Z0-9-_]/g, '') || 'page';
+  return `${safe}.${ext}`;
+}
+
+function uniquePath(dir, filename, ext) {
+  let finalPath = path.join(dir, filename);
+  let i = 1;
+  const base = path.basename(filename, `.${ext}`);
+  while (fs.existsSync(finalPath)) {
+    finalPath = path.join(dir, `${base}_${i}.${ext}`);
+    i++;
+  }
+  return finalPath;
+}
+
+// ---------- Bundlers ----------
 async function bundlePptx(trackingLog, outDir) {
   const pptx = new PptxGenJS();
   for (const item of trackingLog) {
@@ -252,7 +210,7 @@ async function bundlePptx(trackingLog, outDir) {
   }
   const outPath = path.join(outDir, 'compiled_presentation.pptx');
   await pptx.writeFile({ fileName: outPath });
-  for (const item of trackingLog) fs.existsSync(item.filepath) && fs.unlinkSync(item.filepath);
+  trackingLog.forEach(i => fs.existsSync(i.filepath) && fs.unlinkSync(i.filepath));
   return outPath;
 }
 
@@ -262,130 +220,74 @@ async function bundleDocx(trackingLog, outDir) {
     children.push(new docx.Paragraph({
       children: [new docx.ImageRun({ data: fs.readFileSync(item.filepath), transformation: { width: 620, height: 380 } })]
     }));
-    children.push(new docx.Paragraph({ text: item.url }));
+    children.push(new docx.Paragraph({ text: item.url || '' }));
   }
   const doc = new docx.Document({ sections: [{ children }] });
   const buffer = await docx.Packer.toBuffer(doc);
   const outPath = path.join(outDir, 'compiled_document.docx');
   fs.writeFileSync(outPath, buffer);
-  for (const item of trackingLog) fs.existsSync(item.filepath) && fs.unlinkSync(item.filepath);
+  trackingLog.forEach(i => fs.existsSync(i.filepath) && fs.unlinkSync(i.filepath));
   return outPath;
 }
 
-// ---------- link shortener ----------
-async function shortenUrl(longUrl) {
-  const res = await fetch(`https://is.gd/create.php?format=simple&url=${encodeURIComponent(longUrl)}`);
-  if (!res.ok) throw new Error(`shortener API returned HTTP ${res.status}`);
-  return (await res.text()).trim();
-}
-
-// ---------- interactive wizard ----------
-async function runWizard(defaultFormat) {
-  const { url } = await inquirer.prompt([
-    { type: 'input', name: 'url', message: 'URL to capture:', validate: v => v.trim() ? true : 'A URL is required.' }
-  ]);
-  const isSlides = url.includes('docs.google.com') && url.includes('/presentation');
-
-  const questions = [
-    { type: 'list', name: 'format', message: 'Output format:', choices: ['png', 'jpeg', 'pptx', 'docx'], default: defaultFormat },
-    { type: 'input', name: 'out', message: 'Output folder:', default: './screenshots' },
-    { type: 'input', name: 'max', message: isSlides ? 'Max slides:' : 'Max pages:', default: '50' }
-  ];
-  if (!isSlides) {
-    questions.push({ type: 'input', name: 'depth', message: 'Link depth:', default: '3' });
+async function bundlePdf(trackingLog, outDir) {
+  const pdfDoc = await PDFDocument.create();
+  for (const item of trackingLog) {
+    const pngBytes = fs.readFileSync(item.filepath);
+    const pngImage = await pdfDoc.embedPng(pngBytes);
+    const page = pdfDoc.addPage([pngImage.width, pngImage.height]);
+    page.drawImage(pngImage, { x: 0, y: 0, width: pngImage.width, height: pngImage.height });
   }
-  const rest = await inquirer.prompt(questions);
-  return { url, ...rest, depth: rest.depth || '0' };
+  const pdfBytes = await pdfDoc.save();
+  const outPath = path.join(outDir, 'compiled_document.pdf');
+  fs.writeFileSync(outPath, pdfBytes);
+  trackingLog.forEach(i => fs.existsSync(i.filepath) && fs.unlinkSync(i.filepath));
+  return outPath;
 }
 
-// ---------- main ----------
+// ---------- Main ----------
 async function main() {
   const program = new Command();
   program
     .name('snp')
     .version(PKG.version)
-    .description('Crawls a website or a Google Slides deck and saves screenshots as PNG, JPEG, PPTX, or DOCX.')
-    .option('-u, --url <url>', 'starting URL to capture')
-    .option('-o, --out <dir>', 'output directory', './screenshots')
-    .option('-f, --format <format>', 'png, jpeg, pptx, or docx')
-    .option('-m, --max <number>', 'max pages/slides to capture', '50')
-    .option('-d, --depth <number>', 'max link depth for website crawls', '3')
-    .option('--all-domains', 'also follow links to other domains (default: same-domain only)')
-    .option('--width <px>', 'viewport width', '1440')
-    .option('--height <px>', 'viewport height', '900')
-    .option('--sl <url>', 'shorten a URL and exit');
+    .description('Smart crawler for websites & Google Slides → PNG/JPEG/PPTX/DOCX/PDF')
+    .option('-u, --url <url>', 'Starting URL')
+    .option('-o, --out <dir>', 'Output directory', './screenshots')
+    .option('-f, --format <format>', 'png, jpeg, pptx, docx, pdf', 'png')
+    .option('-m, --max <number>', 'Max slides/pages', '100')
+    .option('-d, --depth <number>', 'Max link depth (websites)', '3')
+    .option('--all-domains', 'Follow links to other domains')
+    .option('--no-watermark', 'Skip watermark stripping prompt');
 
-  program.addHelpText('after', `
-Examples:
-  $ snp                                    Launch the interactive wizard
-  $ snp -u https://example.com -f pptx     Crawl a site, bundle output to PPTX
-  $ snp -u "<google slides link>" -f docx  Capture every slide of a published deck
-  $ snp --sl "https://long-url.com/..."    Shorten a URL
-  $ snp uninstall                          Remove snp-crcli from this machine
-`);
-
-  program.parse(process.argv);
+  program.parse();
   const opts = program.opts();
-
-  if (opts.sl) {
-    try {
-      console.log(await shortenUrl(opts.sl));
-    } catch (err) {
-      console.error(`Could not shorten URL: ${err.message}`);
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  let config = loadConfig();
-  if (!config) {
-    if (process.stdout.isTTY) {
-      console.log("First run — let's set a default format.");
-      const { defaultFormat } = await inquirer.prompt([
-        { type: 'list', name: 'defaultFormat', message: 'Default output format:', choices: ['png', 'jpeg', 'pptx', 'docx'] }
-      ]);
-      config = { defaultFormat };
-      saveConfig(config);
-    } else {
-      config = { defaultFormat: 'png' };
-    }
-  }
 
   let args;
   if (!opts.url && process.stdout.isTTY) {
-    args = await runWizard(config.defaultFormat);
-  } else if (!opts.url) {
-    program.help();
-    return;
+    args = await inquirer.prompt([
+      { type: 'input', name: 'url', message: 'URL to capture:' },
+      { type: 'list', name: 'format', message: 'Output format:', choices: ['png', 'jpeg', 'pptx', 'docx', 'pdf'], default: 'png' },
+      { type: 'input', name: 'out', message: 'Output folder:', default: './screenshots' },
+      { type: 'input', name: 'max', message: 'Max slides/pages:', default: '100' },
+      { type: 'confirm', name: 'stripWatermark', message: 'Strip watermarks/branding?', default: true }
+    ]);
   } else {
-    args = {
-      url: opts.url,
-      out: opts.out,
-      format: opts.format || config.defaultFormat,
-      max: opts.max,
-      depth: opts.depth
-    };
+    args = { ...opts, stripWatermark: !opts.noWatermark };
   }
 
   const startUrl = new URL(args.url);
   const outDir = path.resolve(args.out);
-  const format = ['png', 'jpeg', 'pptx', 'docx'].includes((args.format || '').toLowerCase())
-    ? args.format.toLowerCase()
-    : 'png';
-  const imgFormat = ['pptx', 'docx'].includes(format) ? 'png' : format;
-  const maxPages = Math.max(1, parseInt(args.max, 10) || 50);
-  const maxDepth = Math.max(0, parseInt(args.depth, 10) || 0);
-  const sameDomainOnly = !opts.allDomains;
-
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
-  console.log(`Target: ${startUrl.href}`);
-  console.log(`Output: ${outDir}`);
+  const format = args.format.toLowerCase();
+  const imgFormat = ['pptx','docx','pdf'].includes(format) ? 'png' : format;
+  const maxPages = Math.max(1, parseInt(args.max, 10) || 100);
+  const maxDepth = Math.max(0, parseInt(args.depth, 10) || 3);
+  const sameDomainOnly = !opts.allDomains;
 
-  const browser = await chromium.launch();
-  const context = await browser.newContext({
-    viewport: { width: parseInt(args.width || '1440', 10), height: parseInt(args.height || '900', 10) }
-  });
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 
   const progressBar = new cliProgress.SingleBar({
     format: 'Capturing |{bar}| {percentage}% | {value}/{total}',
@@ -406,22 +308,16 @@ Examples:
     await browser.close();
   }
 
-  if (!trackingLog.length) {
-    console.log('Nothing was captured. Check the URL and try again.');
-    return;
-  }
-
   if (format === 'pptx') {
-    console.log('Building .pptx...');
+    console.log('Building PPTX...');
     console.log(`Saved: ${await bundlePptx(trackingLog, outDir)}`);
   } else if (format === 'docx') {
-    console.log('Building .docx...');
+    console.log('Building DOCX...');
     console.log(`Saved: ${await bundleDocx(trackingLog, outDir)}`);
+  } else if (format === 'pdf') {
+    console.log('Building PDF...');
+    console.log(`Saved: ${await bundlePdf(trackingLog, outDir)}`);
   } else {
-    fs.writeFileSync(
-      path.join(outDir, '_manifest.json'),
-      JSON.stringify(trackingLog.map(i => ({ url: i.url, file: i.file })), null, 2)
-    );
     console.log(`Saved ${trackingLog.length} screenshot(s) to ${outDir}`);
   }
 }
