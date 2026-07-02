@@ -1,94 +1,75 @@
-```markdown
-# snp-crcli 📸
+# snp-crcli
 
-An advanced terminal automation engine that crawls links or targets Google Slides presentations, captures snapshots, and bundles them into your choice of static formats—including images, PowerPoint presentations, or Word documents.
-
----
-
-## Features
-
-* **Interactive TUI Mode**: Launch the wizard by typing `snp` without arguments.
-* **Smart Google Slides Automation**: Detects presentation structures and systematically hits navigational keys to save every slide layout.
-* **Document Bundle Formats**: Supports direct compilations into `.pptx` and `.docx` out of the box.
-* **First-Run Sync**: Remembers your preferred default format across operations.
-* **Secure URL Shortener**: Directly integrated link management sub-system.
-
----
+Crawl a website — or a published Google Slides deck — and save what you find as PNG, JPEG, PPTX, or DOCX. No flags needed; running `snp` on its own launches an interactive wizard.
 
 ## Install
 
-Install globally onto your system architecture via npm:
-
 ```bash
 npm install -g snp-crcli
-
 ```
 
----
+Requires Node 18+. A headless Chromium build installs automatically on first setup.
 
-## Usage Syntax
+## Usage
 
-### 1. Interactive Application UI Mode
-
-Simple call the application without positional parameters to initiate the TUI wizard configuration setup:
+**Interactive wizard** (recommended for first-time use):
 
 ```bash
 snp
-
 ```
 
-### 2. Standard CLI Automation Commands
+**Direct CLI mode:**
 
 ```bash
-snp --url "[https://example.com](https://example.com)" --out ./shots --format pptx --max 25
-
+snp -u https://example.com -o ./shots -f pptx -m 25
 ```
 
-### 3. Google Slides Layout Capture Execution
-
-*Always wrap highly parameterized URLs in strict quotation marks to avoid zsh terminal escaping evaluation bugs.*
+**Google Slides** (use the published link: File > Share > Publish to web):
 
 ```bash
-snp --url "[https://docs.google.com/presentation/d/e/2PACX-1vQ1.../pub](https://docs.google.com/presentation/d/e/2PACX-1vQ1.../pub)" --format pptx --max 15
-
+snp -u "https://docs.google.com/presentation/d/e/2PACX-.../pub" -f docx -m 30
 ```
 
-### 4. Link Shortener Routine
+**Shorten a link:**
 
 ```bash
-snp --sl "[https://my-long-deep-link-location-here.com/data/metrics](https://my-long-deep-link-location-here.com/data/metrics)"
-
+snp --sl "https://example.com/some/very/long/path"
 ```
 
----
-
-## Technical Configuration Parameters
-
-| Flag | Parameter Target | Default Value |
-| --- | --- | --- |
-| `-u, --url` | Target web destination or slide system | — |
-| `-o, --out` | Absolute or relative asset directory path | `./screenshots` |
-| `-f, --format` | Selection criteria: `png`, `jpeg`, `pptx`, `docx` | `png` *(or first-run pick)* |
-| `-m, --max` | Cutoff ceiling capacity threshold limit | `50` |
-| `-d, --depth` | Level tracking depth boundary index for crawls | `3` |
-| `--sl` | Address link pipeline to pass through to shortener API | — |
-| `--help` | Reflect operational specifications documentation | — |
-
----
-
-## How to Uninstall
-
-To smoothly purge the global package execution binary and its tracking context completely from your system registry infrastructure, run:
+**Uninstall:**
 
 ```bash
 snp uninstall
-
 ```
+
+**Full command list:**
+
+```bash
+snp --help
+```
+
+## How it decides a page is "ready"
+
+Instead of waiting on network events — which never quiet down on sites like Google Slides that keep background connections open — snp hashes the visible frame every ~200ms and waits until the picture stops changing before it screenshots. On Slides specifically, it also reads the on-screen page counter, so a slide with a multi-step build animation gets captured only once it's fully revealed, not mid-build.
+
+## Flags
+
+| Flag | Description | Default |
+|---|---|---|
+| `-u, --url <url>` | Starting URL or Slides link | — |
+| `-o, --out <dir>` | Output directory | `./screenshots` |
+| `-f, --format <format>` | `png`, `jpeg`, `pptx`, or `docx` | your saved default |
+| `-m, --max <number>` | Max pages or slides | `50` |
+| `-d, --depth <number>` | Max link depth (websites only) | `3` |
+| `--all-domains` | Also follow links off the starting domain | off (same-domain only) |
+| `--width <px>` / `--height <px>` | Viewport size | `1440` / `900` |
+| `--sl <url>` | Shorten a URL and exit | — |
+
+## Output
+
+- `png` / `jpeg`: individual screenshots plus a `_manifest.json` mapping URL → file
+- `pptx` / `docx`: a single compiled document; the intermediate screenshots are deleted after bundling
 
 ## License
 
-[MIT](https://www.google.com/search?q=LICENSE)
-
-```
-
-```
+MIT
