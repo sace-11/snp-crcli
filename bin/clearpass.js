@@ -16,6 +16,29 @@ const { URL } = require('url');
 const { execSync } = require('child_process');
 const { Command } = require('commander');
 const readline = require('readline');
+const os = require('os');
+
+function chooseFolderOS() {
+  try {
+    const platform = os.platform();
+    if (platform === 'darwin') {
+      return execSync('osascript -e \'POSIX path of (choose folder with prompt "Select Output Directory")\'', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } else if (platform === 'win32') {
+      const psScript = `
+        Add-Type -AssemblyName System.windows.forms;
+        $f = New-Object System.Windows.Forms.FolderBrowserDialog;
+        $f.Description = 'Select Output Directory';
+        $f.ShowNewFolderButton = $true;
+        if($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK){ $f.SelectedPath }
+      `;
+      return execSync(`powershell -Command "${psScript.replace(/\n/g, ' ')}"`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } else {
+      return execSync('zenity --file-selection --directory --title="Select Output Directory"', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    }
+  } catch (err) {
+    return null;
+  }
+}
 
 const PKG = require('../package.json');
 const CONFIG_PATH = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.clearpass-config.json');
@@ -574,11 +597,20 @@ async function runInteractiveShell() {
         console.log(chalk.green(`Max pages/slides set to ${config.maxPages}`));
       }
     } else if (cmd === '/out') {
-      if (!arg) console.log(chalk.red('Please specify a directory.'));
-      else {
+      if (arg) {
         config.outDir = arg;
         saveConfig(config);
         console.log(chalk.green(`Output directory set to ${config.outDir}`));
+      } else {
+        console.log(chalk.cyan('Opening file explorer to choose directory...'));
+        const folder = chooseFolderOS();
+        if (folder && fs.existsSync(folder)) {
+          config.outDir = folder;
+          saveConfig(config);
+          console.log(chalk.green(`Output directory set to ${config.outDir}`));
+        } else {
+          console.log(chalk.red('Directory selection cancelled or failed.'));
+        }
       }
     } else if (cmd === '/bulk' || cmd === '/b') {
       console.log(chalk.yellow('\nEnter URLs (one per line). Leave blank and press Enter to finish:'));
