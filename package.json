@@ -4,8 +4,8 @@
   "description": "Crawl websites or Google Slides and save as PNG, JPEG, PPTX, DOCX, PDF, or MHTML with visual stability detection and TUI.",
   "main": "bin/clearpass.js",
   "bin": {
-    "clearpass": "./bin/clearpass.js",
-    "snp": "./bin/clearpass.js"
+    "clearpass": "bin/clearpass.js",
+    "snp": "bin/clearpass.js"
   },
   "scripts": {
     "postinstall": "playwright install chromium || true"
