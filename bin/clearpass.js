@@ -197,7 +197,26 @@ function uniquePath(dir, filename, ext) {
 }
 
 // ---------- captures ----------
-async function crawlGoogleSlides(context, startUrl, { outDir, imgFormat, maxPages, progressBar }) {
+async function downloadNativeGoogleSlides(page, startUrl, format, outDir) {
+  const match = startUrl.pathname.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (!match) throw new Error('Could not extract Google Slides ID');
+  const slideId = match[1];
+  
+  const exportUrl = `https://docs.google.com/presentation/d/${slideId}/export/${format}`;
+  
+  console.log(chalk.yellow(`\nDownloading native ${format.toUpperCase()} with full interactivity...`));
+  
+  const downloadPromise = page.waitForEvent('download', { timeout: 60000 });
+  await page.goto(exportUrl);
+  const download = await downloadPromise;
+  
+  const finalPath = uniquePath(outDir, `presentation.${format}`, format);
+  await download.saveAs(finalPath);
+  console.log(chalk.green(`\u2714 Saved native export: ${finalPath}`));
+  return true; 
+}
+
+async function crawlPresentation(context, startUrl, { outDir, imgFormat, maxPages, progressBar }) {
   const page = await context.newPage();
   const trackingLog = [];
   try {
@@ -224,6 +243,7 @@ async function crawlGoogleSlides(context, startUrl, { outDir, imgFormat, maxPage
 
     const maxIterations = target * 8; 
     let iterations = 0;
+    let sameFrameCount = 0;
     let lastFrameHash = await waitForStableFrame(page);
 
     while (slideNum <= target && iterations < maxIterations) {
@@ -238,26 +258,39 @@ async function crawlGoogleSlides(context, startUrl, { outDir, imgFormat, maxPage
       await page.screenshot({ path: finalPath, fullPage: false, type: imgFormat });
 
       if (!trackingLog.find(t => t.slide === slideNum)) {
-        trackingLog.push({ url: `${startUrl.href}#slide=${slideNum}`, file: filename, filepath: finalPath, slide: slideNum });
+        trackingLog.push({ url: startUrl.href, file: filename, filepath: finalPath, slide: slideNum });
       }
 
       await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(100);
       const newHash = await waitForStableFrame(page);
 
-      if (newHash === lastFrameHash) break; 
-      lastFrameHash = newHash;
+      if (newHash === lastFrameHash) {
+        await page.keyboard.press('Space');
+        const hash2 = await waitForStableFrame(page, { timeoutMs: 2000, quietMs: 200 });
+        if (hash2 === lastFrameHash) {
+          sameFrameCount++;
+          if (sameFrameCount > 2) break;
+        } else {
+          lastFrameHash = hash2;
+          sameFrameCount = 0;
+        }
+      } else {
+        lastFrameHash = newHash;
+        sameFrameCount = 0;
+      }
 
       if (indicatorSupported) {
         const indicator = await readSlideIndicator(page);
         if (indicator && indicator !== lastIndicator) {
           const prevNum = parseIndicatorNum(lastIndicator);
           const nextNum = parseIndicatorNum(indicator);
-          if (prevNum !== null && nextNum !== null && nextNum < prevNum) break; 
+          if (prevNum !== null && nextNum !== null && nextNum <= prevNum) break; 
           lastIndicator = indicator;
-          slideNum++;
-          if (progressBar) progressBar.update(Math.min(slideNum - 1, target));
         }
-      } else {
+      }
+      
+      if (sameFrameCount === 0) {
         slideNum++;
         if (progressBar) progressBar.update(Math.min(slideNum - 1, target));
       }
@@ -519,21 +552,38 @@ async function runCapture(browser, args) {
   });
 
   const isGoogleSlides = startUrl.hostname.includes('docs.google.com') && startUrl.pathname.includes('/presentation');
+  const isPresentation = args.isPresentation || isGoogleSlides;
 
   let trackingLog = [];
   global.isCapturing = true;
   global.abortCapture = false;
 
   try {
+    if (isGoogleSlides && (format === 'pdf' || format === 'pptx')) {
+      const page = await context.newPage();
+      try {
+        await downloadNativeGoogleSlides(page, startUrl, format, outDir);
+        return; 
+      } catch (err) {
+        console.error(chalk.red(`Native export failed (${err.message}). Falling back to screen capture...`));
+      } finally {
+        await page.close();
+      }
+    }
+
+    if (isGoogleSlides && ['png', 'jpeg'].includes(format)) {
+      console.log(chalk.yellow('Note: Saving as images will strip interactive hyperlinks. Use format "pdf" or "pptx" to preserve them natively.'));
+    }
+
     if (format === 'mhtml') {
       console.log(chalk.yellow(`\nCreating interactive MHTML archive for ${startUrl.href}`));
       trackingLog = await captureMhtml(context, startUrl, outDir);
     } else if (args.scrapeText) {
       console.log(chalk.yellow(`\nScraping text from ${startUrl.href}`));
       trackingLog = await scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth, sameDomainOnly, progressBar });
-    } else if (isGoogleSlides) {
-      console.log(chalk.yellow(`\nCapturing Google Slides deck from ${startUrl.href}`));
-      trackingLog = await crawlGoogleSlides(context, startUrl, { outDir, imgFormat, maxPages, progressBar });
+    } else if (isPresentation) {
+      console.log(chalk.yellow(`\nCapturing presentation from ${startUrl.href}`));
+      trackingLog = await crawlPresentation(context, startUrl, { outDir, imgFormat, maxPages, progressBar });
     } else {
       console.log(chalk.yellow(`\nCrawling website ${startUrl.href}`));
       trackingLog = await crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, maxDepth, sameDomainOnly, progressBar });
@@ -675,7 +725,7 @@ async function runInteractiveShell() {
       } else {
         try {
           new URL(targetUrl);
-          await runCapture(browser, { url: targetUrl });
+          await runCapture(browser, { url: targetUrl, isPresentation: (cmd === '/slides' || cmd === '/s') });
         } catch {
           console.log(chalk.red('Invalid URL provided.'));
         }
@@ -713,6 +763,7 @@ async function runCliMode() {
     .option('-m, --max <number>', 'max pages/slides', String(config.maxPages))
     .option('-d, --depth <number>', 'max link depth for website crawls', '0')
     .option('--scrape', 'extract text instead of screenshots')
+    .option('--slides', 'treat as a generic presentation (Canva, Pitch, etc.)')
     .option('--all-domains', 'also follow links to other domains (default: same-domain only)');
 
   program.parse(process.argv);
@@ -736,7 +787,8 @@ async function runCliMode() {
       maxPages: parseInt(opts.max, 10),
       depth: parseInt(opts.depth, 10),
       sameDomainOnly: !opts.allDomains,
-      scrapeText: opts.scrape
+      scrapeText: opts.scrape,
+      isPresentation: opts.slides
     });
   } finally {
     await browser.close();
