@@ -23,7 +23,18 @@ Once inside the TUI, use the following commands:
 - `/slides <url>`: Capture a Google Slides presentation.
 - `/bulk`: Enter bulk-URL mode (paste multiple URLs, hit enter twice).
 - `/format <fmt>`: Set default output format (`png`, `jpeg`, `pptx`, `docx`, `pdf`, `mhtml`).
-- `/max <number>`: Set max pages/slides (default 300).
+### Crawl Settings
+- `/m <number>` or `/max <number>`: Set the maximum number of pages to crawl (Default: 300)
+- `/d <number>` or `/depth <number>`: Set the maximum crawl depth
+- `/domain <all|same>`: Control domain crawling boundary
+
+## Universal Presentation Crawler
+Clearpass doesn't just capture websites; it can smartly traverse **published presentation decks**.
+
+- **Google Slides Native Interactivity**: If Clearpass detects a Google Slides URL and you've selected `pdf` or `pptx` format, it seamlessly bypasses screenshotting and leverages a native API to download the deck. This completely preserves **all interactive hyperlinks**, vectors, and text selection natively.
+- **Generic Crawler (Canva, Pitch, SlideShare)**: For other platforms, run `/slides <url>`. Clearpass uses a visual hashing algorithm alongside simulated keystrokes (`ArrowRight` / `Space`) to advance slides automatically until it detects the end of the presentation.
+
+*Note: Generating raw images (`png` or `jpeg`) of presentations strips interactivity, as images cannot contain clickable hyperlinks. Ensure your format is set to `pdf` if interactivity is required!*
 - `/out [dir]`: Set output folder. **Leave `[dir]` blank to open a native OS folder picker!**
 - `?` or `/help`: Show all commands.
 - `q` or `/quit`: Exit.
