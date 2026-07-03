@@ -1,6 +1,6 @@
 {
   "name": "clearpass",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Crawl websites or Google Slides and save as PNG, JPEG, PPTX, DOCX, PDF, or MHTML with visual stability detection and TUI.",
   "main": "bin/clearpass.js",
   "bin": {
