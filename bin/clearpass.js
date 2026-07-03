@@ -172,7 +172,14 @@ async function crawlGoogleSlides(context, startUrl, { outDir, imgFormat, maxPage
     const m = lastIndicator ? lastIndicator.match(/(\d+)\s*\/\s*(\d+)/) : null;
     if (m) totalHint = parseInt(m[2], 10);
     const target = totalHint ? Math.min(maxPages, totalHint) : maxPages;
-    if (progressBar) progressBar.start(target, 0);
+    const isKnownTotal = !!totalHint;
+    
+    if (progressBar) {
+      progressBar.options.format = isKnownTotal 
+        ? `${chalk.blue('{bar}')} {percentage}% | {value}/{total} pages`
+        : `${chalk.blue('Capturing...')} {value} slides captured`;
+      progressBar.start(target, 0);
+    }
 
     const maxIterations = target * 8; 
     let iterations = 0;
@@ -181,7 +188,7 @@ async function crawlGoogleSlides(context, startUrl, { outDir, imgFormat, maxPage
     while (slideNum <= target && iterations < maxIterations) {
       iterations++;
 
-      const filename = `slide_${String(slideNum).padStart(2, '0')}.${imgFormat}`;
+      const filename = `slide_${slideNum}.${imgFormat}`;
       const finalPath = path.join(outDir, filename);
       await page.screenshot({ path: finalPath, fullPage: false, type: imgFormat });
 
@@ -222,7 +229,11 @@ async function crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, ma
   const queue = [{ url: startUrl.href, depth: 0 }];
   const trackingLog = [];
   let count = 0;
-  if (progressBar) progressBar.start(maxPages, 0);
+  
+  if (progressBar) {
+    progressBar.options.format = `${chalk.blue('Crawling...')} {value} pages processed`;
+    progressBar.start(maxPages, 0);
+  }
 
   while (queue.length > 0 && count < maxPages) {
     const { url, depth } = queue.shift();
@@ -234,7 +245,7 @@ async function crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, ma
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await settlePage(page);
 
-      const filename = urlToFilename(url, imgFormat);
+      const filename = `snap_${count + 1}.${imgFormat}`;
       const finalPath = uniquePath(outDir, filename, imgFormat);
       await page.screenshot({ path: finalPath, fullPage: true, type: imgFormat });
       trackingLog.push({ url, file: path.basename(finalPath), filepath: finalPath });
@@ -271,7 +282,11 @@ async function scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth
   const queue = [{ url: startUrl.href, depth: 0 }];
   const trackingLog = [];
   let count = 0;
-  if (progressBar) progressBar.start(maxPages, 0);
+
+  if (progressBar) {
+    progressBar.options.format = `${chalk.blue('Scraping...')} {value} pages extracted`;
+    progressBar.start(maxPages, 0);
+  }
 
   while (queue.length > 0 && count < maxPages) {
     const { url, depth } = queue.shift();
@@ -287,7 +302,7 @@ async function scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth
       const htmlContent = await page.evaluate(() => document.body.innerHTML);
       const markdown = NodeHtmlMarkdown.translate(htmlContent);
 
-      const filename = urlToFilename(url, 'md');
+      const filename = `scrape_${count + 1}.md`;
       const finalPath = uniquePath(outDir, filename, 'md');
       fs.writeFileSync(finalPath, markdown, 'utf8');
       trackingLog.push({ url, file: path.basename(finalPath), filepath: finalPath, markdown });
@@ -414,7 +429,7 @@ async function captureMhtml(context, startUrl, outDir) {
     const cdpSession = await context.newCDPSession(page);
     const { data } = await cdpSession.send('Page.captureSnapshot', { format: 'mhtml' });
     
-    const filename = urlToFilename(startUrl.href, 'mhtml');
+    const filename = `archive_1.mhtml`;
     const finalPath = uniquePath(outDir, filename, 'mhtml');
     fs.writeFileSync(finalPath, data);
     return [{ url: startUrl.href, file: path.basename(finalPath), filepath: finalPath }];
@@ -442,7 +457,7 @@ async function runCapture(browser, args) {
   });
 
   const progressBar = new cliProgress.SingleBar({
-    format: `${chalk.blue('{bar}')} {percentage}% | {value}/{total} pages`,
+    format: `${chalk.blue('Running...')} {value} completed`,
     barCompleteChar: '\u2588',
     barIncompleteChar: '\u2591',
     hideCursor: true
