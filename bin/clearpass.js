@@ -197,7 +197,23 @@ async function readSlideIndicator(page) {
 }
 
 // ---------- filename helpers ----------
-function urlToFilename(targetUrl, ext) {
+function sanitizeFilename(name) {
+  if (!name || typeof name !== 'string') return '';
+  const safe = name
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[.]+|[.]+$/g, '')
+    .trim()
+    .slice(0, 120);
+  return safe === '.' || safe === '..' ? '' : safe;
+}
+
+function urlToFilename(targetUrl, ext, title = null) {
+  if (title) {
+    const safe = sanitizeFilename(title);
+    if (safe) return `${safe}.${ext}`;
+  }
   const u = new URL(targetUrl);
   const host = u.hostname.replace(/^www\./, '');
   const hash = crypto.randomBytes(2).toString('hex');
@@ -206,13 +222,14 @@ function urlToFilename(targetUrl, ext) {
 
 function uniquePath(dir, filename, ext) {
   let finalPath = path.join(dir, filename);
+  if (!fs.existsSync(finalPath)) return finalPath;
   let i = 1;
   const base = path.basename(filename, `.${ext}`);
-  while (fs.existsSync(finalPath)) {
-    finalPath = path.join(dir, `${base}_${i}.${ext}`);
+  while (true) {
+    finalPath = path.join(dir, `${base}(${i}).${ext}`);
+    if (!fs.existsSync(finalPath)) return finalPath;
     i++;
   }
-  return finalPath;
 }
 
 // ---------- captures ----------
@@ -224,12 +241,17 @@ async function downloadNativeGoogleSlides(page, startUrl, format, outDir) {
   const exportUrl = `https://docs.google.com/presentation/d/${slideId}/export/${format}`;
   
   console.log(chalk.yellow(`\nDownloading native ${format.toUpperCase()} with full interactivity...`));
+
+  // Capture presentation title before triggering export download
+  await page.goto(startUrl.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await settlePage(page);
+  const pageTitle = await page.title().catch(() => '');
   
   const downloadPromise = page.waitForEvent('download', { timeout: 4000 });
   await page.goto(exportUrl);
   const download = await downloadPromise;
   
-  const filename = urlToFilename(startUrl.href, format);
+  const filename = urlToFilename(startUrl.href, format, pageTitle);
   const finalPath = uniquePath(outDir, filename, format);
   await download.saveAs(finalPath);
   console.log(chalk.green(`\u2714 Saved native export: ${finalPath}`));
@@ -238,10 +260,12 @@ async function downloadNativeGoogleSlides(page, startUrl, format, outDir) {
 
 async function crawlPresentation(context, startUrl, { outDir, imgFormat, maxPages, progressBar }) {
   const page = await context.newPage();
+  let pageTitle = '';
   const trackingLog = [];
   try {
     await page.goto(startUrl.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await settlePage(page);
+    pageTitle = await page.title().catch(() => '');
 
     let slideNum = 1;
     let lastIndicator = await readSlideIndicator(page);
@@ -278,8 +302,8 @@ async function crawlPresentation(context, startUrl, { outDir, imgFormat, maxPage
       }
       iterations++;
 
-      const filename = `Slide ${slideNum}.${imgFormat}`;
-      const finalPath = path.join(outDir, filename);
+      const filename = urlToFilename(startUrl.href, imgFormat, pageTitle);
+      const finalPath = uniquePath(outDir, filename, imgFormat);
       await page.screenshot({ path: finalPath, fullPage: false, type: imgFormat });
 
       const pageW = await page.evaluate(() => window.innerWidth);
@@ -333,13 +357,14 @@ async function crawlPresentation(context, startUrl, { outDir, imgFormat, maxPage
   } finally {
     await page.close();
   }
-  return trackingLog;
+  return { trackingLog, title: pageTitle };
 }
 
 async function crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, maxDepth, sameDomainOnly, progressBar }) {
   const visited = new Set();
   const queue = [{ url: startUrl.href, depth: 0 }];
   const trackingLog = [];
+  let pageTitle = '';
   let count = 0;
   
   if (progressBar) {
@@ -367,7 +392,9 @@ async function crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, ma
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await settlePage(page);
 
-      const filename = `Snap ${count + 1}.${imgFormat}`;
+      const urlTitle = await page.title().catch(() => '');
+      if (count === 0) pageTitle = urlTitle;
+      const filename = urlToFilename(url, imgFormat, urlTitle);
       const finalPath = uniquePath(outDir, filename, imgFormat);
       await page.screenshot({ path: finalPath, fullPage: true, type: imgFormat });
       trackingLog.push({ url, file: path.basename(finalPath), filepath: finalPath });
@@ -395,7 +422,7 @@ async function crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, ma
     }
   }
   if (progressBar) progressBar.update(count);
-  return trackingLog;
+  return { trackingLog, title: pageTitle };
 }
 
 // ---------- scrape text ----------
@@ -403,6 +430,7 @@ async function scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth
   const visited = new Set();
   const queue = [{ url: startUrl.href, depth: 0 }];
   const trackingLog = [];
+  let pageTitle = '';
   let count = 0;
 
   if (progressBar) {
@@ -434,7 +462,9 @@ async function scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth
       const htmlContent = await page.evaluate(() => document.body.innerHTML);
       const markdown = NodeHtmlMarkdown.translate(htmlContent);
 
-      const filename = `Scrape ${count + 1}.md`;
+      const urlTitle = await page.title().catch(() => '');
+      if (count === 0) pageTitle = urlTitle;
+      const filename = urlToFilename(url, 'md', urlTitle);
       const finalPath = uniquePath(outDir, filename, 'md');
       fs.writeFileSync(finalPath, markdown, 'utf8');
       trackingLog.push({ url, file: path.basename(finalPath), filepath: finalPath, markdown });
@@ -462,11 +492,11 @@ async function scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth
     }
   }
   if (progressBar) progressBar.update(count);
-  return trackingLog;
+  return { trackingLog, title: pageTitle };
 }
 
 // ---------- bundlers ----------
-async function bundlePptx(trackingLog, outDir, isText, startUrl) {
+async function bundlePptx(trackingLog, outDir, isText, startUrl, title) {
   const pptx = new PptxGenJS();
   if (isText) {
     for (const item of trackingLog) {
@@ -492,14 +522,14 @@ async function bundlePptx(trackingLog, outDir, isText, startUrl) {
       }
     }
   }
-  const filename = urlToFilename(startUrl.href, 'pptx');
+  const filename = urlToFilename(startUrl.href, 'pptx', title);
   const outPath = uniquePath(outDir, filename, 'pptx');
   await pptx.writeFile({ fileName: outPath });
   for (const item of trackingLog) fs.existsSync(item.filepath) && fs.unlinkSync(item.filepath);
   return outPath;
 }
 
-async function bundleDocx(trackingLog, outDir, isText, startUrl) {
+async function bundleDocx(trackingLog, outDir, isText, startUrl, title) {
   const children = [];
   for (const item of trackingLog) {
     children.push(new docx.Paragraph({
@@ -521,15 +551,15 @@ async function bundleDocx(trackingLog, outDir, isText, startUrl) {
   }
   const doc = new docx.Document({ sections: [{ children }] });
   const buffer = await docx.Packer.toBuffer(doc);
-  const filename = urlToFilename(startUrl.href, 'docx');
+  const filename = urlToFilename(startUrl.href, 'docx', title);
   const outPath = uniquePath(outDir, filename, 'docx');
   fs.writeFileSync(outPath, buffer);
   for (const item of trackingLog) fs.existsSync(item.filepath) && fs.unlinkSync(item.filepath);
   return outPath;
 }
 
-async function bundlePdf(trackingLog, outDir, isText, startUrl) {
-  const filename = urlToFilename(startUrl.href, 'pdf');
+async function bundlePdf(trackingLog, outDir, isText, startUrl, title) {
+  const filename = urlToFilename(startUrl.href, 'pdf', title);
   const outPath = uniquePath(outDir, filename, 'pdf');
   
   if (isText) {
@@ -600,17 +630,19 @@ async function bundlePdf(trackingLog, outDir, isText, startUrl) {
 
 async function captureMhtml(context, startUrl, outDir) {
   const page = await context.newPage();
+  let pageTitle = '';
   try {
     await page.goto(startUrl.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await settlePage(page);
+    pageTitle = await page.title().catch(() => '');
 
     const cdpSession = await context.newCDPSession(page);
     const { data } = await cdpSession.send('Page.captureSnapshot', { format: 'mhtml' });
     
-    const filename = urlToFilename(startUrl.href, 'mhtml');
+    const filename = urlToFilename(startUrl.href, 'mhtml', pageTitle);
     const finalPath = uniquePath(outDir, filename, 'mhtml');
     fs.writeFileSync(finalPath, data);
-    return [{ url: startUrl.href, file: path.basename(finalPath), filepath: finalPath }];
+    return { trackingLog: [{ url: startUrl.href, file: path.basename(finalPath), filepath: finalPath }], title: pageTitle };
   } finally {
     await page.close();
   }
@@ -656,6 +688,7 @@ async function runCapture(browser, args) {
   if (isGoogleSlides) isPresentation = true;
 
   let trackingLog = [];
+  let pageTitle = '';
   global.isCapturing = true;
   global.abortCapture = false;
 
@@ -682,22 +715,32 @@ async function runCapture(browser, args) {
       }
       // Fallback: crawl it like a generic presentation
       console.log(chalk.yellow(`\nCapturing Google Slides via visual crawler fallback...`));
-      trackingLog = await crawlPresentation(context, startUrl, { outDir, imgFormat: ['pptx', 'docx', 'pdf'].includes(format) ? 'png' : format, maxPages, progressBar });
+      const crawlResult = await crawlPresentation(context, startUrl, { outDir, imgFormat: ['pptx', 'docx', 'pdf'].includes(format) ? 'png' : format, maxPages, progressBar });
+      trackingLog = crawlResult.trackingLog;
+      pageTitle = crawlResult.title;
     } else if (format === 'mhtml') {
       console.log(chalk.yellow(`\nCreating interactive MHTML archive for ${startUrl.href}`));
-      trackingLog = await captureMhtml(context, startUrl, outDir);
+      const mhtmlResult = await captureMhtml(context, startUrl, outDir);
+      trackingLog = mhtmlResult.trackingLog;
+      pageTitle = mhtmlResult.title;
     } else if (args.scrapeText) {
       console.log(chalk.yellow(`\nScraping text from ${startUrl.href}`));
-      trackingLog = await scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth, sameDomainOnly, progressBar });
+      const scrapeResult = await scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth, sameDomainOnly, progressBar });
+      trackingLog = scrapeResult.trackingLog;
+      pageTitle = scrapeResult.title;
     } else if (isPresentation) {
       if (isGoogleSlides && ['png', 'jpeg'].includes(format)) {
         console.log(chalk.yellow('Note: Saving as images will strip interactive hyperlinks. Use format "pdf" or "pptx" to preserve them natively.'));
       }
       console.log(chalk.yellow(`\nCapturing presentation from ${startUrl.href}`));
-      trackingLog = await crawlPresentation(context, startUrl, { outDir, imgFormat, maxPages, progressBar });
+      const crawlResult = await crawlPresentation(context, startUrl, { outDir, imgFormat, maxPages, progressBar });
+      trackingLog = crawlResult.trackingLog;
+      pageTitle = crawlResult.title;
     } else {
       console.log(chalk.yellow(`\nCrawling website ${startUrl.href}`));
-      trackingLog = await crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, maxDepth, sameDomainOnly, progressBar });
+      const crawlResult = await crawlWebsite(context, startUrl, { outDir, imgFormat, maxPages, maxDepth, sameDomainOnly, progressBar });
+      trackingLog = crawlResult.trackingLog;
+      pageTitle = crawlResult.title;
     }
   } catch (err) {
     if (progressBar.isActive) progressBar.stop();
@@ -718,15 +761,15 @@ async function runCapture(browser, args) {
   const isText = !!args.scrapeText;
   if (format === 'pptx') {
     console.log(chalk.cyan('\nBuilding .pptx...'));
-    console.log(chalk.green(`\u2714 Saved: ${await bundlePptx(trackingLog, outDir, isText, startUrl)}`));
+    console.log(chalk.green(`\u2714 Saved: ${await bundlePptx(trackingLog, outDir, isText, startUrl, pageTitle)}`));
   } else if (format === 'docx') {
     console.log(chalk.cyan('\nBuilding .docx...'));
-    console.log(chalk.green(`\u2714 Saved: ${await bundleDocx(trackingLog, outDir, isText, startUrl)}`));
+    console.log(chalk.green(`\u2714 Saved: ${await bundleDocx(trackingLog, outDir, isText, startUrl, pageTitle)}`));
   } else if (format === 'pdf') {
     console.log(chalk.cyan('\nBuilding .pdf...'));
-    console.log(chalk.green(`\u2714 Saved: ${await bundlePdf(trackingLog, outDir, isText, startUrl)}`));
+    console.log(chalk.green(`\u2714 Saved: ${await bundlePdf(trackingLog, outDir, isText, startUrl, pageTitle)}`));
   } else {
-    const manifestPath = uniquePath(outDir, urlToFilename(startUrl.href, 'json'), 'json');
+    const manifestPath = uniquePath(outDir, urlToFilename(startUrl.href, 'json', pageTitle), 'json');
     fs.writeFileSync(
       manifestPath,
       JSON.stringify(trackingLog.map(i => ({ url: i.url, file: i.file })), null, 2)
