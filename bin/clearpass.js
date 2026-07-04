@@ -129,7 +129,7 @@ async function checkForCaptcha(page) {
   try {
     const isCaptcha = await page.evaluate(() => {
       const text = document.body.innerText.toLowerCase();
-      if (text.includes('checking if the site connection is secure') || text.includes('verify you are human') || text.includes('just a moment...')) return 'Cloudflare / Security check';
+      if (text.includes('checking if the site connection is secure') || text.includes('verify you are human') || text.includes('just a moment...') || text.includes('verification successful')) return 'Cloudflare / Security check';
       if (document.querySelector('iframe[src*="recaptcha"]')) return 'reCAPTCHA';
       if (document.querySelector('iframe[src*="hcaptcha"]')) return 'hCaptcha';
       if (document.querySelector('#challenge-running')) return 'Cloudflare Turnstile';
@@ -144,18 +144,25 @@ async function checkForCaptcha(page) {
 async function settlePage(page) {
   await page.waitForLoadState('domcontentloaded').catch(() => {});
   
-  // Wait up to 15 seconds for Cloudflare/Security checks to auto-resolve
+  // Wait up to 25 seconds for Cloudflare/Security checks to auto-resolve
+  let wasBlocked = false;
   try {
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 25; i++) {
       const title = await page.title();
       const isCaptcha = await checkForCaptcha(page);
       if (title.toLowerCase().includes('just a moment') || isCaptcha) {
+        wasBlocked = true;
         await page.waitForTimeout(1000);
       } else {
         break;
       }
     }
   } catch (e) {}
+
+  if (wasBlocked) {
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
+    await page.waitForTimeout(2000);
+  }
 
   await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
   
