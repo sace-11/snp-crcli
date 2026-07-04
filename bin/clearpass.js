@@ -247,23 +247,15 @@ async function downloadNativeGoogleSlides(page, startUrl, format, outDir) {
   await settlePage(page);
   const pageTitle = await page.title().catch(() => '');
   
-  try {
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 4000 }),
-      page.goto(exportUrl)
-    ]);
-
-    const filename = urlToFilename(startUrl.href, format, pageTitle);
-    const finalPath = uniquePath(outDir, filename, format);
-    await download.saveAs(finalPath);
-    console.log(chalk.green(`\u2714 Saved native export: ${finalPath}`));
-    return true;
-  } catch (err) {
-    if (err.name === 'TimeoutError' || (err.message && err.message.includes('Timeout'))) {
-      return false;
-    }
-    throw err;
-  }
+  const downloadPromise = page.waitForEvent('download', { timeout: 4000 });
+  await page.goto(exportUrl);
+  const download = await downloadPromise;
+  
+  const filename = urlToFilename(startUrl.href, format, pageTitle);
+  const finalPath = uniquePath(outDir, filename, format);
+  await download.saveAs(finalPath);
+  console.log(chalk.green(`\u2714 Saved native export: ${finalPath}`));
+  return true; 
 }
 
 async function crawlPresentation(context, startUrl, { outDir, imgFormat, maxPages, progressBar }) {
@@ -894,7 +886,7 @@ async function runInteractiveShell() {
           try {
             await runCapture(browser, { url: urls[i] });
           } catch (err) {
-            console.error(chalk.red(`[-] Failed to process URL, skipping to next...`));
+            console.error(chalk.red(`[-] Failed to process ${urls[i]}, skipping to next...`));
             if (err && err.message) console.error(chalk.dim(err.message));
           }
         }
