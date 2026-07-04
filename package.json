@@ -1,6 +1,6 @@
 {
   "name": "clearpass",
-  "version": "4.3.6",
+  "version": "4.3.7",
   "description": "Crawl websites or Google Slides and save as PNG, JPEG, PPTX, DOCX, PDF, or MHTML with visual stability detection and TUI.",
   "main": "bin/clearpass.js",
   "bin": {
@@ -25,7 +25,7 @@
     "bulk",
     "google-slides"
   ],
-  "author": "sace-11",
+  "author": "rivhallo11",
   "license": "MIT",
   "engines": {
     "node": ">=18"
@@ -44,10 +44,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/sace-11/clearpass.git"
+    "url": "git+https://github.com/rivhallo11/clearpass.git"
   },
   "bugs": {
-    "url": "https://github.com/sace-11/clearpass/issues"
+    "url": "https://github.com/rivhallo11/clearpass/issues"
   },
-  "homepage": "https://github.com/sace-11/clearpass#readme"
+  "homepage": "https://github.com/rivhallo11/clearpass#readme"
 }
