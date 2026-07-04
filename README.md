@@ -29,11 +29,13 @@ clearpass
 
 ### Commands & Auto-Detect
 
-If you simply type or paste a URL (e.g., `https://example.com`), the engine will **auto-detect** the type of content and capture it appropriately. However, you can use explicit commands to force specific behaviors:
+If you simply type or paste a URL (e.g., `https://example.com`), the engine will **auto-detect** the type of content and capture it appropriately.
 
-- `/snap <url>`: **Force Screenshots.** Bypasses presentation auto-detect and forcefully captures the webpage as raw screenshots.
-- `/scrape <url>`: **Extract Text.** Extracts the raw text/markdown of the website instead of taking images. (Outputs as Markdown, DOCX, or PDF).
-- `/slides <url>`: **Force Presentation.** Forces the engine to treat the URL as a presentation deck, even if it's not on the auto-detect whitelist.
+The explicit commands are still there so you can override the auto-detection if it guesses wrong, or if you want to perform a specific action:
+
+- `/snap <url>` (Force Screenshots): Use this if the engine accidentally detects a website as a presentation and you want to force it to just take raw screenshots of the page.
+- `/scrape <url>` (Extract Text): Auto-detect never scrapes text by default. If you want to extract the raw markdown text from a webpage instead of taking images, you must explicitly use this command.
+- `/slides <url>` (Force Presentation): Use this if you have a presentation link from a niche platform that the engine doesn't recognize (not Canva, Pitch, etc.). This forces the engine to use the Presentation Crawler logic.
 - `/bulk`: Enter bulk-URL mode (paste multiple URLs, hit enter on an empty line to finish).
 - `/format <fmt>`: Set default output format (`png`, `jpeg`, `pptx`, `docx`, `pdf`, `mhtml`).
 - `/max <number>`: Set max pages/slides (default 300).
