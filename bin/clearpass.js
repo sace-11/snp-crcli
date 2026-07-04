@@ -247,15 +247,23 @@ async function downloadNativeGoogleSlides(page, startUrl, format, outDir) {
   await settlePage(page);
   const pageTitle = await page.title().catch(() => '');
   
-  const downloadPromise = page.waitForEvent('download', { timeout: 4000 });
-  await page.goto(exportUrl);
-  const download = await downloadPromise;
-  
-  const filename = urlToFilename(startUrl.href, format, pageTitle);
-  const finalPath = uniquePath(outDir, filename, format);
-  await download.saveAs(finalPath);
-  console.log(chalk.green(`\u2714 Saved native export: ${finalPath}`));
-  return true; 
+  try {
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 4000 }),
+      page.goto(exportUrl)
+    ]);
+
+    const filename = urlToFilename(startUrl.href, format, pageTitle);
+    const finalPath = uniquePath(outDir, filename, format);
+    await download.saveAs(finalPath);
+    console.log(chalk.green(`\u2714 Saved native export: ${finalPath}`));
+    return true;
+  } catch (err) {
+    if (err.name === 'TimeoutError' || (err.message && err.message.includes('Timeout'))) {
+      return false;
+    }
+    throw err;
+  }
 }
 
 async function crawlPresentation(context, startUrl, { outDir, imgFormat, maxPages, progressBar }) {
@@ -883,7 +891,12 @@ async function runInteractiveShell() {
         console.log(chalk.cyan(`\nProcessing ${urls.length} URL(s)...\n`));
         for (let i = 0; i < urls.length; i++) {
           console.log(chalk.blue(`[${i + 1}/${urls.length}] ${urls[i]}`));
-          await runCapture(browser, { url: urls[i] });
+          try {
+            await runCapture(browser, { url: urls[i] });
+          } catch (err) {
+            console.error(chalk.red(`[-] Failed to process URL, skipping to next...`));
+            if (err && err.message) console.error(chalk.dim(err.message));
+          }
         }
       } else {
         console.log(chalk.dim('No valid URLs entered. Bulk cancelled.'));
