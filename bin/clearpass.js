@@ -616,8 +616,8 @@ async function runCapture(browser, args) {
   let format = ['png', 'jpeg', 'pptx', 'docx', 'pdf', 'mhtml'].includes((args.format || config.defaultFormat).toLowerCase())
     ? (args.format || config.defaultFormat).toLowerCase() : 'png';
   
-  if (args.scrapeText && format !== 'pdf' && format !== 'docx') {
-    console.log(chalk.yellow(`\n[Info] Scraping text strictly requires PDF or DOCX format. Forcing format to PDF.`));
+  if (args.scrapeText && format !== 'pdf' && format !== 'docx' && format !== 'mhtml') {
+    console.log(chalk.yellow(`\n[Info] Scraping text strictly requires PDF, DOCX, or MHTML format. Forcing format to PDF.`));
     format = 'pdf';
   }
   
