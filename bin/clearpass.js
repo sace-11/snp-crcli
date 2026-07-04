@@ -178,10 +178,11 @@ async function readSlideIndicator(page) {
 // ---------- filename helpers ----------
 function urlToFilename(targetUrl, ext) {
   const u = new URL(targetUrl);
+  const host = u.hostname.replace(/^www\./, '');
   let p = (u.pathname === '/' || u.pathname === '') ? 'home' : u.pathname;
   p = p.replace(/^\/|\/$/g, '').replace(/\//g, '_');
   const query = u.search ? '_' + u.search.replace(/[?&=]/g, '-') : '';
-  const safe = (p + query).replace(/[^a-zA-Z0-9-_]/g, '') || 'page';
+  const safe = (host + '_' + p + query).replace(/[^a-zA-Z0-9-_]/g, '_') || 'capture';
   return `${safe}.${ext}`;
 }
 
@@ -437,7 +438,7 @@ async function scrapeWebsiteText(context, startUrl, { outDir, maxPages, maxDepth
 }
 
 // ---------- bundlers ----------
-async function bundlePptx(trackingLog, outDir, isText) {
+async function bundlePptx(trackingLog, outDir, isText, startUrl) {
   const pptx = new PptxGenJS();
   if (isText) {
     for (const item of trackingLog) {
@@ -451,13 +452,14 @@ async function bundlePptx(trackingLog, outDir, isText) {
       slide.addImage({ path: item.filepath, x: 0, y: 0, w: '100%', h: '100%' });
     }
   }
-  const outPath = path.join(outDir, 'compiled_presentation.pptx');
+  const filename = urlToFilename(startUrl.href, 'pptx');
+  const outPath = uniquePath(outDir, filename, 'pptx');
   await pptx.writeFile({ fileName: outPath });
   for (const item of trackingLog) fs.existsSync(item.filepath) && fs.unlinkSync(item.filepath);
   return outPath;
 }
 
-async function bundleDocx(trackingLog, outDir, isText) {
+async function bundleDocx(trackingLog, outDir, isText, startUrl) {
   const children = [];
   for (const item of trackingLog) {
     children.push(new docx.Paragraph({
@@ -479,14 +481,16 @@ async function bundleDocx(trackingLog, outDir, isText) {
   }
   const doc = new docx.Document({ sections: [{ children }] });
   const buffer = await docx.Packer.toBuffer(doc);
-  const outPath = path.join(outDir, 'compiled_document.docx');
+  const filename = urlToFilename(startUrl.href, 'docx');
+  const outPath = uniquePath(outDir, filename, 'docx');
   fs.writeFileSync(outPath, buffer);
   for (const item of trackingLog) fs.existsSync(item.filepath) && fs.unlinkSync(item.filepath);
   return outPath;
 }
 
-async function bundlePdf(trackingLog, outDir, isText) {
-  const outPath = path.join(outDir, 'compiled_document.pdf');
+async function bundlePdf(trackingLog, outDir, isText, startUrl) {
+  const filename = urlToFilename(startUrl.href, 'pdf');
+  const outPath = uniquePath(outDir, filename, 'pdf');
   
   if (isText) {
     // Basic text to PDF
@@ -532,7 +536,7 @@ async function captureMhtml(context, startUrl, outDir) {
     const cdpSession = await context.newCDPSession(page);
     const { data } = await cdpSession.send('Page.captureSnapshot', { format: 'mhtml' });
     
-    const filename = `Archive 1.mhtml`;
+    const filename = urlToFilename(startUrl.href, 'mhtml');
     const finalPath = uniquePath(outDir, filename, 'mhtml');
     fs.writeFileSync(finalPath, data);
     return [{ url: startUrl.href, file: path.basename(finalPath), filepath: finalPath }];
@@ -632,19 +636,20 @@ async function runCapture(browser, args) {
   const isText = !!args.scrapeText;
   if (format === 'pptx') {
     console.log(chalk.cyan('\nBuilding .pptx...'));
-    console.log(chalk.green(`\u2714 Saved: ${await bundlePptx(trackingLog, outDir, isText)}`));
+    console.log(chalk.green(`\u2714 Saved: ${await bundlePptx(trackingLog, outDir, isText, startUrl)}`));
   } else if (format === 'docx') {
     console.log(chalk.cyan('\nBuilding .docx...'));
-    console.log(chalk.green(`\u2714 Saved: ${await bundleDocx(trackingLog, outDir, isText)}`));
+    console.log(chalk.green(`\u2714 Saved: ${await bundleDocx(trackingLog, outDir, isText, startUrl)}`));
   } else if (format === 'pdf') {
     console.log(chalk.cyan('\nBuilding .pdf...'));
-    console.log(chalk.green(`\u2714 Saved: ${await bundlePdf(trackingLog, outDir, isText)}`));
+    console.log(chalk.green(`\u2714 Saved: ${await bundlePdf(trackingLog, outDir, isText, startUrl)}`));
   } else {
+    const manifestPath = uniquePath(outDir, urlToFilename(startUrl.href, 'json'), 'json');
     fs.writeFileSync(
-      path.join(outDir, '_manifest.json'),
+      manifestPath,
       JSON.stringify(trackingLog.map(i => ({ url: i.url, file: i.file })), null, 2)
     );
-    console.log(chalk.green(`\u2714 Saved ${trackingLog.length} files to ${outDir}`));
+    console.log(chalk.green(`\u2714 Saved ${trackingLog.length} files and manifest to ${manifestPath}`));
   }
 }
 
