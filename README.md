@@ -17,7 +17,7 @@ npm install -g clearpass
 - **Reconstructed Interactivity**: The visual crawler automatically extracts hyperlink coordinates from presentation slides and injects them as clickable links into your final PDFs and PPTXs.
 - **Intelligent Naming System**: Your output files will be given extremely short, readable, and 100% unique names (e.g., `canva-4f8a.pdf`), completely preventing accidental overwriting.
 - **Visual Stability Engine**: It doesn't blindly screenshot. It compares image hashes to ensure animations and lazy-loaded elements are finished rendering.
-- **Smart Security Bypass**: Detects Cloudflare and reCAPTCHA to prevent useless screenshots of "Checking your browser..."
+- **Smart Security Bypass**: Detects Cloudflare and reCAPTCHA. **New:** It now actively waits for Cloudflare's "Just a moment..." challenges to automatically resolve instead of blindly snapshotting the security clearance screen!
 - **Safe Interrupts**: Press `Ctrl+Q` at any time to safely abort a crawl without losing the progress you've already made!
 
 ## Interactive Shell (TUI)
@@ -34,7 +34,7 @@ If you simply type or paste a URL (e.g., `https://example.com`), the engine will
 The explicit commands are still there so you can override the auto-detection if it guesses wrong, or if you want to perform a specific action:
 
 - `/snap <url>` (Force Screenshots): Use this if the engine accidentally detects a website as a presentation and you want to force it to just take raw screenshots of the page.
-- `/scrape <url>` (Extract Text): Auto-detect never scrapes text by default. If you want to extract the raw markdown text from a webpage instead of taking images, you must explicitly use this command.
+- `/scrape <url>` (Extract Text): Auto-detect never scrapes text by default. If you want to extract the raw markdown text from a webpage instead of taking images, you must explicitly use this command. **Note: Scraping strictly outputs to PDF or DOCX formats only. If another format is set, it will safely override to PDF.**
 - `/slides <url>` (Force Presentation): Use this if you have a presentation link from a niche platform that the engine doesn't recognize (not Canva, Pitch, etc.). This forces the engine to use the Presentation Crawler logic.
 - `/bulk`: Enter bulk-URL mode (paste multiple URLs, hit enter on an empty line to finish).
 - `/format <fmt>`: Set default output format (`png`, `jpeg`, `pptx`, `docx`, `pdf`, `mhtml`).

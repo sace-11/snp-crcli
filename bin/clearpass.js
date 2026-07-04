@@ -143,6 +143,20 @@ async function checkForCaptcha(page) {
 
 async function settlePage(page) {
   await page.waitForLoadState('domcontentloaded').catch(() => {});
+  
+  // Wait up to 15 seconds for Cloudflare/Security checks to auto-resolve
+  try {
+    for (let i = 0; i < 15; i++) {
+      const title = await page.title();
+      const isCaptcha = await checkForCaptcha(page);
+      if (title.toLowerCase().includes('just a moment') || isCaptcha) {
+        await page.waitForTimeout(1000);
+      } else {
+        break;
+      }
+    }
+  } catch (e) {}
+
   await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
   
   const captcha = await checkForCaptcha(page);
@@ -599,8 +613,13 @@ async function captureMhtml(context, startUrl, outDir) {
 async function runCapture(browser, args) {
   const startUrl = new URL(args.url);
   const outDir = path.resolve(args.outDir || config.outDir);
-  const format = ['png', 'jpeg', 'pptx', 'docx', 'pdf', 'mhtml'].includes((args.format || config.defaultFormat).toLowerCase())
+  let format = ['png', 'jpeg', 'pptx', 'docx', 'pdf', 'mhtml'].includes((args.format || config.defaultFormat).toLowerCase())
     ? (args.format || config.defaultFormat).toLowerCase() : 'png';
+  
+  if (args.scrapeText && format !== 'pdf' && format !== 'docx') {
+    console.log(chalk.yellow(`\n[Info] Scraping text strictly requires PDF or DOCX format. Forcing format to PDF.`));
+    format = 'pdf';
+  }
   
   const imgFormat = ['pptx', 'docx', 'pdf'].includes(format) ? 'png' : format;
   const maxPages = args.maxPages || config.maxPages;
