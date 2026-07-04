@@ -79,7 +79,7 @@ const cliProgress = require('cli-progress');
 const PptxGenJS = require('pptxgenjs');
 const docx = require('docx');
 const chalk = require('chalk');
-const { PDFDocument } = require('pdf-lib');
+const { PDFDocument, PDFName, PDFString, PDFArray, PDFDict } = require('pdf-lib');
 const TurndownService = require('turndown');
 const { NodeHtmlMarkdown } = require('node-html-markdown');
 
@@ -179,11 +179,8 @@ async function readSlideIndicator(page) {
 function urlToFilename(targetUrl, ext) {
   const u = new URL(targetUrl);
   const host = u.hostname.replace(/^www\./, '');
-  let p = (u.pathname === '/' || u.pathname === '') ? 'home' : u.pathname;
-  p = p.replace(/^\/|\/$/g, '').replace(/\//g, '_');
-  const query = u.search ? '_' + u.search.replace(/[?&=]/g, '-') : '';
-  const safe = (host + '_' + p + query).replace(/[^a-zA-Z0-9-_]/g, '_') || 'capture';
-  return `${safe}.${ext}`;
+  const hash = crypto.randomBytes(2).toString('hex');
+  return `${host}-${hash}.${ext}`;
 }
 
 function uniquePath(dir, filename, ext) {
@@ -207,11 +204,12 @@ async function downloadNativeGoogleSlides(page, startUrl, format, outDir) {
   
   console.log(chalk.yellow(`\nDownloading native ${format.toUpperCase()} with full interactivity...`));
   
-  const downloadPromise = page.waitForEvent('download', { timeout: 60000 });
+  const downloadPromise = page.waitForEvent('download', { timeout: 4000 });
   await page.goto(exportUrl);
   const download = await downloadPromise;
   
-  const finalPath = uniquePath(outDir, `presentation.${format}`, format);
+  const filename = urlToFilename(startUrl.href, format);
+  const finalPath = uniquePath(outDir, filename, format);
   await download.saveAs(finalPath);
   console.log(chalk.green(`\u2714 Saved native export: ${finalPath}`));
   return true; 
@@ -263,8 +261,17 @@ async function crawlPresentation(context, startUrl, { outDir, imgFormat, maxPage
       const finalPath = path.join(outDir, filename);
       await page.screenshot({ path: finalPath, fullPage: false, type: imgFormat });
 
+      const pageW = await page.evaluate(() => window.innerWidth);
+      const pageH = await page.evaluate(() => window.innerHeight);
+      const links = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('a[href]')).map(a => {
+          const rect = a.getBoundingClientRect();
+          return { href: a.href, x: rect.x, y: rect.y, w: rect.width, h: rect.height };
+        }).filter(l => l.w > 0 && l.h > 0);
+      });
+
       if (!trackingLog.find(t => t.slide === slideNum)) {
-        trackingLog.push({ url: startUrl.href, file: filename, filepath: finalPath, slide: slideNum });
+        trackingLog.push({ url: startUrl.href, file: filename, filepath: finalPath, slide: slideNum, links, pageW, pageH });
       }
 
       await page.keyboard.press('ArrowRight');
@@ -450,6 +457,18 @@ async function bundlePptx(trackingLog, outDir, isText, startUrl) {
     for (const item of trackingLog) {
       const slide = pptx.addSlide();
       slide.addImage({ path: item.filepath, x: 0, y: 0, w: '100%', h: '100%' });
+      if (item.links && item.pageW && item.pageH) {
+        for (const link of item.links) {
+          const xPct = (link.x / item.pageW) * 100 + '%';
+          const yPct = (link.y / item.pageH) * 100 + '%';
+          const wPct = (link.w / item.pageW) * 100 + '%';
+          const hPct = (link.h / item.pageH) * 100 + '%';
+          slide.addText('', {
+            hyperlink: { url: link.href },
+            x: xPct, y: yPct, w: wPct, h: hPct
+          });
+        }
+      }
     }
   }
   const filename = urlToFilename(startUrl.href, 'pptx');
@@ -517,6 +536,37 @@ async function bundlePdf(trackingLog, outDir, isText, startUrl) {
       if (image) {
         const page = pdfDoc.addPage([image.width, image.height]);
         page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+
+        if (item.links && item.pageW && item.pageH) {
+          const scaleX = image.width / item.pageW;
+          const scaleY = image.height / item.pageH;
+          for (const link of item.links) {
+            const pdfX = link.x * scaleX;
+            const pdfY = image.height - (link.y * scaleY) - (link.h * scaleY);
+            const pdfW = link.w * scaleX;
+            const pdfH = link.h * scaleY;
+
+            const linkAnnot = pdfDoc.context.obj({
+              Type: 'Annot',
+              Subtype: 'Link',
+              Rect: [pdfX, pdfY, pdfX + pdfW, pdfY + pdfH],
+              Border: [0, 0, 0],
+              A: {
+                Type: 'Action',
+                S: 'URI',
+                URI: PDFString.of(link.href),
+              },
+            });
+
+            const annotRef = pdfDoc.context.register(linkAnnot);
+            let annots = page.node.lookup(PDFName.of('Annots'), PDFArray);
+            if (!annots) {
+              annots = pdfDoc.context.obj([]);
+              page.node.set(PDFName.of('Annots'), annots);
+            }
+            annots.push(annotRef);
+          }
+        }
       }
     }
     const pdfBytes = await pdfDoc.save();
@@ -571,7 +621,13 @@ async function runCapture(browser, args) {
   });
 
   const isGoogleSlides = startUrl.hostname.includes('docs.google.com') && startUrl.pathname.includes('/presentation');
-  const isPresentation = args.isPresentation || isGoogleSlides;
+  
+  let isPresentation = args.isPresentation;
+  if (isPresentation === undefined && !args.forceSnap) {
+    const host = startUrl.hostname;
+    isPresentation = isGoogleSlides || host.includes('canva.com') || host.includes('pitch.com') || host.includes('slideshare.net') || host.includes('gamma.app') || host.includes('tome.app');
+  }
+  if (isGoogleSlides) isPresentation = true;
 
   let trackingLog = [];
   global.isCapturing = true;
@@ -770,7 +826,9 @@ async function runInteractiveShell() {
       } else {
         try {
           new URL(targetUrl);
-          await runCapture(browser, { url: targetUrl, isPresentation: (cmd === '/slides' || cmd === '/s') });
+          const forceSnap = cmd === '/snap';
+          const isPresentation = (cmd === '/slides' || cmd === '/s') ? true : undefined;
+          await runCapture(browser, { url: targetUrl, isPresentation, forceSnap });
         } catch {
           console.log(chalk.red('Invalid URL provided.'));
         }
